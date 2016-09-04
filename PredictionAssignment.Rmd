@@ -1,0 +1,130 @@
+---
+title: "Prediction Assignment"
+author: "Florent Combes"
+date: "1 septembre 2016"
+output: html_document
+---
+
+<style type="text/css">
+
+body {
+   font-size: 12px;
+}
+td {
+   font-size: 11px;
+}
+code.r{
+  font-size: 11px;
+}
+pre {
+  font-size: 9px
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The goal of the project is to predict the manner in which people did the exercise, ie to predict the classe variable in the training set. 
+
+##Data
+We use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, who were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har a
+```{r, message=FALSE, warning=FALSE}
+training<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",na.strings=c("NA",""))
+testing<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",na.strings=c("NA",""))
+```
+
+##Choice of the variables
+### sensors measures
+The variables corresponds to 4 group of measures relative to 4 sensors: arm, belt, forearm, dumbbell, with the same kind of measures.
+The variable "classe" is the variable to predict.
+The remaining variables are identifiers for the people, time and window. We won't use them as we wan't to predict using only the measures.
+
+## keeping only the non NA fields
+Some variables consist mainly in NA.
+It seems to be very binary: either we have 0 NAs or we have around 98% NAs.
+
+```{r, warning=FALSE,message=FALSE}
+library(knitr)
+#names
+sensors=c("_arm","_belt","_dumbbell", "_forearm")
+sensors_names=list()
+sensors_pctNA=list()
+for (i in 1:4) {
+  sensors_names[[i]]<-sort(names(training)[grep(sensors[i],names(training))])
+  sensors_pctNA[[i]]<-sapply(sensors_names[[i]], function(s) round(mean(is.na(training[,s])),2))
+}
+kable(data.frame(sensors_names[[1]],sensors_pctNA[[1]],sensors_names[[2]],
+                 sensors_pctNA[[2]],sensors_names[[3]],sensors_pctNA[[3]],sensors_names[[4]],sensors_pctNA[[4]]),
+                 col.names=c("arm","%NA","belt","%NA","dumbbell","%NA","foreamr","%NA"),"markdown")
+
+```
+
+t<-apply(!is.na(training[7:160]),2,sum)>19621
+length(t)
+cbind(order(t),use)
+
+##Building the model
+To train the model, We take all the variables related to sensors measures, that have measures for every rows.
+As they are some noise in the sensors, random forest method is used to predict "classe".
+
+###Separate the training set for cross validation
+```{r, warning=FALSE, message=FALSE}
+library(caret)
+set.seed(15)
+#clean the training set
+use<-c(sensors_names[[1]][sensors_pctNA[[1]]==0],sensors_names[[2]][sensors_pctNA[[2]]==0],
+       sensors_names[[3]][sensors_pctNA[[3]]==0],sensors_names[[4]][sensors_pctNA[[4]]==0])
+trainingClean<-training[,c("classe",use)]
+#split the training to get out of sample data
+inTrain<-createDataPartition(trainingClean[,1],p=0.7,list = FALSE)
+trainingClean.in<-trainingClean[inTrain,]
+trainingClean.out<-trainingClean[-inTrain,]
+```
+  
+##  cross validation
+We use the function rfcv which shows the cross-validated prediction performance of models cross-validated prediction performance of models.
+We observe that the error rate of the model decreases fast. After 13 variables, the performance is marginaly improved. 
+Our strategy is to keep the 13 most important variables.
+
+```{r,fig.height=3,fig.width=4}
+library(randomForest)
+crossValid<-rfcv(trainingClean.in[,-1],trainingClean.in[,1])
+crossValid$error.cv
+```
+
+##model tuning
+We get the 13 most important variables and use them for our model.
+We use the function importance to get them and select this variable
+```{r}
+#get the 13 most important variables
+fit1<-randomForest(classe~.,data=trainingClean.in,importance=TRUE)
+imFit<-importance(fit1)
+use2<-rownames(imFit[order(imFit[,"MeanDecreaseAccuracy"],decreasing=TRUE),])[1:13]
+use2
+```
+
+##model performance in sample
+The performance of the model appears good with a very high accuracy ratio (>97%).
+```{r}
+#final model presentation
+fit2<-train(classe~.,data=trainingClean.in[,c("classe",use2)],method="rf")
+print(fit2)
+print(fit2$finalModel)
+```
+
+##model performance out of sample
+We use the out of sample data from the partition that we have made. 
+The accuracy ratio is still very high. The model is accurate.
+```{r}
+pred<-predict(fit2,trainingClean.out[,c("classe",use2)])
+confusionMatrix(pred,trainingClean.out$classe)
+```
+
+##model prediction for the Quizz test
+```{r}
+pred<-matrix(predict(fit2,testing[,use2]),20,1)
+```
+
+
